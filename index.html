@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
 :root{
   --paper:#F6F4EE;
@@ -523,6 +524,7 @@ footer{
     <div class="top-actions">
       <button class="btn btn-primary" id="addSourceBtn">+ Add source</button>
       <button class="btn btn-ghost" id="publishSettingsBtn">⚙ Publish settings</button>
+      <button class="btn btn-ghost" id="exportXlsxBtn">⬇ Export to Excel</button>
       <button class="btn btn-ghost" id="exportBtn">⬇ Export data.json</button>
     </div>
   </div>
@@ -1322,6 +1324,146 @@ async function publishToGitHub(){
   }
 }
 document.getElementById('publishNowBtn').onclick = publishToGitHub;
+
+/* ---------- Export to Excel (site is the source of truth) ---------- */
+const SHEET_FIELD_ROWS = [
+  ['ARTICLE INFORMATION','Title','Title'],
+  ['ARTICLE INFORMATION','APA Authors','APA Authors'],
+  ['ARTICLE INFORMATION','Year','Year'],
+  ['ARTICLE INFORMATION','Source Type','Source Type'],
+  ['ARTICLE INFORMATION','Dissertation Flag','Dissertation Flag'],
+  ['METHOD','Design / Method','Design/Method'],
+  ['METHOD','Framework','Framework'],
+  ['METHOD','Setting','Setting'],
+  ['METHOD','Country','Country'],
+  ['METHOD','Population','Population'],
+  ['METHOD','Sample / Scope','Sample/Scope'],
+  ['METHOD','Data Source','Data Source'],
+  ['METHOD','Analysis','Analysis'],
+  ['ARTICLE SUMMARY','One-Paragraph Summary','One-Paragraph Summary'],
+  ['KEY FINDINGS','Finding 1','Finding 1'],
+  ['KEY FINDINGS','Primary Themes','Primary Themes'],
+  ['CHAPTER 2 ALIGNMENT','Chapter 2 Use','Chapter 2 Use'],
+  ['CHAPTER 2 ALIGNMENT','Framework Connection','Framework Connection'],
+  ['CHAPTER 2 ALIGNMENT','Phenomenon Connection','Phenomenon Connection'],
+  ['LIMITATIONS','Study Limitations','Study Limitations'],
+  ['GAP','Gap / Need','Gap/Need'],
+  ['QUALITY','Strength','Strength'],
+  ['QUALITY','Use Boundary','Use Boundary'],
+  ['SOURCE','URL / DOI','Source URL/DOI'],
+  ['SOURCE','Journal / Publisher','Journal'],
+  ['SOURCE','Volume','Volume'],
+  ['SOURCE','Issue','Issue'],
+  ['SOURCE','Pages / Article No.','Pages'],
+  ['AI INVOLVEMENT','AI Assisted','AI Assisted'],
+  ['AI INVOLVEMENT','AI Tool(s) Used','AI Tools'],
+  ['AI INVOLVEMENT','What the AI Did','AI Role'],
+  ['AI INVOLVEMENT','Verification Status','AI Verified'],
+];
+
+function safeSheetName(name, used){
+  let clean = (name || 'Source').replace(/[\\\/\?\*\[\]:]/g, '-').slice(0, 31);
+  let candidate = clean; let n = 2;
+  while(used.has(candidate)){ candidate = (clean.slice(0, 28) + '-' + n).slice(0,31); n++; }
+  used.add(candidate);
+  return candidate;
+}
+
+// Same palette as the site's own section color-coding, so the export and the
+// website read as one system even though these aren't your original workbook's colors.
+const SECTION_COLORS = {
+  'ARTICLE INFORMATION': { fill:'FFD7E7EF', font:'FF1F4A5C' },
+  'METHOD':               { fill:'FFDEEBD6', font:'FF2E5A2A' },
+  'ARTICLE SUMMARY':      { fill:'FFF8EFCF', font:'FF6B551A' },
+  'KEY FINDINGS':         { fill:'FFF6DFC8', font:'FF7A4A1E' },
+  'CHAPTER 2 ALIGNMENT':  { fill:'FFE4DBEF', font:'FF4B3676' },
+  'LIMITATIONS':          { fill:'FFF2D6D6', font:'FF7A2E2E' },
+  'GAP':                  { fill:'FFF1DEC4', font:'FF6B4A1E' },
+  'QUALITY':               { fill:'FFD2E4CE', font:'FF2C5A2C' },
+  'SOURCE':               { fill:'FFD7E7EF', font:'FF1F4A5C' },
+  'AI INVOLVEMENT':       { fill:'FFE0DDEE', font:'FF4B3676' },
+};
+const HEADER_FILL = 'FF12414A';
+
+function styleHeaderRow(row){
+  row.eachCell(cell=>{
+    cell.font = { color:{argb:'FFFFFFFF'}, bold:true, size:11 };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:HEADER_FILL} };
+    cell.alignment = { vertical:'middle', wrapText:true };
+  });
+  row.height = 20;
+}
+
+async function exportToExcel(){
+  if(!window.ExcelJS){ toast('Excel export library did not load — check your connection and retry.', true); return; }
+  const btn = document.getElementById('exportXlsxBtn');
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = 'Building workbook…';
+
+  try{
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Literature Evidence Chart';
+    wb.created = new Date();
+    const rows = [...DATA];
+
+    // Dashboard
+    const dash = wb.addWorksheet('Dashboard');
+    dash.columns = [{width:34},{width:40}];
+    dash.addRow(['Dissertation Literature Evidence Database — Exported from site']).font = {bold:true, size:13, color:{argb:'FF12414A'}};
+    dash.addRow(['Generated', new Date().toLocaleString()]);
+    dash.addRow([]);
+    const dashHeader = dash.addRow(['Metric','Value']);
+    styleHeaderRow(dashHeader);
+    dash.addRow(['Total Sources', rows.length]);
+    const byCat = {};
+    rows.forEach(d=>{ byCat[d.Category] = (byCat[d.Category]||0)+1; });
+    Object.entries(byCat).forEach(([k,v])=> dash.addRow([k, v]));
+
+    // Comprehensive Matrix
+    const matrixCols = ['Author Short','Title','APA Authors','Year','Source Type','Category','Strength',
+      'Chapter 2 Use','Primary Themes','Journal','Volume','Issue','Pages','Source URL/DOI','AI Assisted'];
+    const matrix = wb.addWorksheet('Comprehensive Matrix');
+    matrix.columns = matrixCols.map(c=> ({header:c, key:c, width: c==='Title'||c==='Chapter 2 Use'||c==='Primary Themes' ? 40 : 18}));
+    styleHeaderRow(matrix.getRow(1));
+    rows.forEach(d=> matrix.addRow(matrixCols.map(c=> d[c] ?? '')));
+    matrix.views = [{state:'frozen', ySplit:1}];
+
+    // One sheet per source, color-coded by section
+    const used = new Set(['Dashboard','Comprehensive Matrix']);
+    rows.forEach(d=>{
+      const ws = wb.addWorksheet(safeSheetName(d['Author Short'], used));
+      ws.columns = [{header:'Section', width:20}, {header:'Field', width:24}, {header:'Content', width:80}];
+      styleHeaderRow(ws.getRow(1));
+      SHEET_FIELD_ROWS.forEach(([section, label, key])=>{
+        const row = ws.addRow([section, label, d[key] ?? '']);
+        const colors = SECTION_COLORS[section] || SECTION_COLORS['ARTICLE INFORMATION'];
+        row.eachCell(cell=>{
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colors.fill} };
+          cell.alignment = { vertical:'top', wrapText:true };
+        });
+        row.getCell(1).font = { bold:true, color:{argb:colors.font}, size:10 };
+        row.getCell(2).font = { bold:true, color:{argb:colors.font}, size:10 };
+      });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'Literature_Matrix_Export.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} color-coded sources to Excel.`);
+  }catch(err){
+    console.error(err);
+    toast('Export failed: ' + err.message, true);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+  }
+}
+document.getElementById('exportXlsxBtn').onclick = exportToExcel;
 
 /* ---------- Export ---------- */
 function exportData(){
