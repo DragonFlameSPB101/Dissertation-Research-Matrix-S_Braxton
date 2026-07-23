@@ -1103,9 +1103,6 @@ document.getElementById('sortSelect').addEventListener('change', (e)=>{
 });
 
 loadData();
-renderCh2Map();
-renderThemes();
-renderReference();
 
 /* ---------- Paste from Claude ---------- */
 const CLAUDE_SCHEMA = ['Title','APA Authors','Author Short','Year','Source Type','Dissertation Flag','Article Focus',
@@ -1674,6 +1671,11 @@ function exportData(){
 }
 document.getElementById('exportBtn').onclick = exportData;
 document.getElementById('exportPendingBtn').onclick = exportData;
+
+/* Render the static synthesis views now that all their data and functions are declared */
+renderCh2Map();
+renderThemes();
+renderReference();
 </script>
 </body>
 </html>
